@@ -49,6 +49,51 @@ function addEquipmentTabToSmartProcess($event)
     return new \Bitrix\Main\EventResult(\Bitrix\Main\EventResult::SUCCESS, ['tabs' => $tabs]);
 }
 
+use Bitrix\Main\Loader;
+use Bitrix\Highloadblock\HighloadBlockTable;
+use Bitrix\Main\Entity\Event;
+
+$eventManager = EventManager::getInstance();
+
+// Регистрируем обработчики для HL-блока "Equipment"
+// Важно: префикс события совпадает с кодом сущности HL-блока
+$eventManager->addEventHandler('', 'EquipmentOnAfterAdd', 'recalculateDealEquipmentCount');
+$eventManager->addEventHandler('', 'EquipmentOnAfterUpdate', 'recalculateDealEquipmentCount');
+$eventManager->addEventHandler('', 'EquipmentOnAfterDelete', 'recalculateDealEquipmentCount');
+
+function recalculateDealEquipmentCount(Event $event)
+{
+    // 1. Получаем поля элемента HL-блока из события
+    $arFields = $event->getParameter('fields');
+    $dealId = (int)($arFields['UF_DEAL_ID'] ?? 0);
+
+    if ($dealId <= 0) {
+        return;
+    }
+
+    // 2. Подсчитываем актуальное количество оборудования для этой сделки
+    Loader::includeModule('highloadblock');
+    $hlblock = HighloadBlockTable::getList([
+        'filter' => ['=NAME' => 'Equipment']
+    ])->fetch();
+
+    if (!$hlblock) {
+        return;
+    }
+
+    $entity = HighloadBlockTable::compileEntity($hlblock);
+    $entityClass = $entity->getDataClass();
+
+    $count = $entityClass::getCount([
+        '=UF_DEAL_ID' => $dealId
+    ]);
+
+    // 3. Обновляем пользовательское поле в сделке
+    $GLOBALS['USER_FIELD_MANAGER']->Update('CRM_DEAL', $dealId, [
+        'UF_CRM_1792574496136' => $count
+    ]);
+}
+
 function myDebugLog($data, $label = '') {
     $logPath = $_SERVER['DOCUMENT_ROOT'] . '/local/debug.log';
     $message = date('Y-m-d H:i:s') . ' | ' . $label . ' | ' . print_r($data, true) . "\n";
